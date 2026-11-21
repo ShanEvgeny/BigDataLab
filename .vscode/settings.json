@@ -1,0 +1,5 @@
+{
+    "dataworkspace.excludedProjects": [
+        "movie_db/movie_db.sqlproj"
+    ]
+}

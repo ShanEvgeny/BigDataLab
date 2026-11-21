@@ -1,0 +1,6 @@
+/.venv
+__pycache__
+local.py
+.env
+movie_db
+docker-compose.yml

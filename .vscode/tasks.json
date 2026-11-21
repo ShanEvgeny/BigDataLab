@@ -1,0 +1,21 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "sqlproj: Build movie_db",
+			"type": "process",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"d:/BigDataLab/movie_db/movie_db.sqlproj"
+			],
+			"problemMatcher": "$sqlproj-problem-matcher",
+			"isBackground": true,
+			"group": {
+				"kind": "build",
+				"isDefault": false
+			},
+			"detail": "Выполняет сборку проекта SQL movie_db"
+		}
+	]
+}
