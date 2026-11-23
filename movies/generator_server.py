@@ -5,268 +5,183 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from movies.models import Genre, Country, Director, Movie, Rating, Review
 from django.contrib.auth.models import User
-from itertools import islice
-from django.db import transaction, close_old_connections, connection
+from django.db import connection
+from datetime import date, datetime, time, timedelta
+from django.contrib.auth.hashers import make_password
+from django.utils import timezone
+from django.db.models import Max
 
-BASE_URL = 'http://127.0.0.1:8000/api/'
 fake = Faker('ru_RU')
+START_DATE = date(1995, 1, 1)
+END_DATE = date.today()
 
-# lock = threading.Lock()
+GENRES = ['драма', 'комедия', 'боевик', 'фантастика', 'ужасы', 'триллер',
+          'мелодрама', 'детектив', 'приключения', 'фэнтези', 'документальный',
+          'анимация', 'мюзикл', 'вестерн', 'военный', 'исторический',
+          'криминал', 'семейный', 'спорт', 'биография']
+COUNTRIES = ['США', 'Россия', 'Великобритания', 'Франция', 'Германия', 'Италия',
+             'Испания', 'Япония', 'Китай', 'Индия', 'Канада', 'Австралия',
+             'Бразилия', 'Мексика', 'Южная Корея', 'Швеция', 'Дания',
+             'Норвегия', 'Польша', 'Турция']
+RATING_WEIGHTS = [1, 1, 2, 3, 5, 8, 10, 12, 10, 7]
 
-def create_genres():
+def _aware(dt):
+    """Faker отдаёт naive datetime; трактуем как локальное время."""
+    return timezone.make_aware(dt) if timezone.is_naive(dt) else dt
+
+
+def _local_naive(dt):
+    """aware → naive в локальной TZ (для faker)."""
+    return timezone.localtime(dt).replace(tzinfo=None) if timezone.is_aware(dt) else dt
+
+def gen_directors(n=10):
+    objs = [Director(
+        full_name=fake.name(),
+        short_biography=fake.text(max_nb_chars=400) if random.random() < 0.7 else None,
+        date_of_birth=fake.date_of_birth(minimum_age=25, maximum_age=95)
+                       if random.random() < 0.9 else None,
+    ) for _ in range(n)]
+    Director.objects.bulk_create(objs, batch_size=500)
+    connection.close()
+    print(f'  directors: {n}')
+    pass
+
+def gen_genres():
     if (Genre.objects.exists()):
         return
-    genres = [
-        'Драма', 'Комедия', 'Боевик', 'Фантастика',
-        'Триллер', 'Ужасы', 'Мелодрама', 'Детектив',
-        'Приключения', 'Анимация', 'История', 'Фэнтези'
-    ]
     Genre.objects.bulk_create(
-        [Genre(title=g) for g in genres]
+        [Genre(title=g) for g in GENRES]
     )
+    connection.close()
 
-def create_countries():
+def gen_countries():
     if (Country.objects.exists()):
         return
-    countries = [
-        "Россия", "США", "Великобритания", "Франция", "Германия",
-        "Италия", "Испания", "Канада", "Япония", "Китай",
-        "Индия", "Австралия", "Бразилия", "Мексика", "Южная Корея",
-        "Швеция", "Норвегия", "Польша", "Турция", "Аргентина"
-    ]
     Country.objects.bulk_create(
-        [Country(title=c) for c in countries],
-        batch_size=1000
+        [Country(title=c) for c in COUNTRIES]
     )
+    connection.close()
 
-def create_directors():
-    Director.objects.bulk_create([
-        Director(
-            full_name=fake.name(),
-            short_biography=fake.paragraph(),
-            date_of_birth=fake.date_of_birth(minimum_age=23, maximum_age=89)
-        )
-        for _ in range(1000)
-    ])
+def gen_users(n=100):
+    pwd = make_password('password123')
+    objs = [User(
+        username=f'{fake.user_name()}_{fake.uuid4()}',
+        password=pwd,
+        email=fake.email(),
+        first_name=fake.first_name(),
+        last_name=fake.last_name(),
+        date_joined=_aware(fake.date_time_between(
+            start_date=START_DATE, end_date='now')),
+    ) for _ in range(n)]
+    User.objects.bulk_create(objs, batch_size=100)
+    connection.close()
+    print(f'  users: {n}')
+    pass
 
-def create_users():
-    new_users = []
-    for _ in range(1000):
-        user = User(
-            username=f"{fake.uuid4()}",
-            first_name=fake.first_name(),
-            last_name=fake.last_name(),
-            email=fake.email(),
-            date_joined=fake.date_between(start_date='-25y', end_date='today')
-        )
-        user.set_password(fake.password(length=random.randint(4, 16)))
-        new_users.append(user)
+def gen_movies(n=50):
+    dir_ids = list(Director.objects.values_list('id', flat=True))
+    gen_ids = list(Genre.objects.values_list('id', flat=True))
+    cnt_ids = list(Country.objects.values_list('id', flat=True))
 
-    User.objects.bulk_create(new_users)
+    max_id_before = Movie.objects.aggregate(m=Max('id'))['m'] or 0
+    movies = [Movie(
+        title=fake.sentence(nb_words=3).rstrip('.').capitalize(),
+        date_of_release=fake.date_between(start_date=date(1980, 1, 1),
+                                          end_date=END_DATE),
+        brief_information=fake.text(max_nb_chars=500) if random.random() < 0.6 else None,
+    ) for _ in range(n)]
+    Movie.objects.bulk_create(movies, batch_size=500)
 
-def create_movies():
-    close_old_connections()
-    directors = list(Director.objects.values_list('pk', flat=True))
-    genres = list(Genre.objects.values_list('pk', flat=True))
-    countries = list(Country.objects.values_list('pk', flat=True))
-    movies = [
-        Movie(
-            title=fake.catch_phrase(),
-            date_of_release=fake.date_between(start_date='-70y', end_date='-1y'),
-            brief_information=fake.paragraph()
-        )
-        for _ in range(1000)
-    ]
-    with transaction.atomic():
-        Movie.objects.bulk_create(movies)
+    mids = list(Movie.objects.filter(id__gt=max_id_before)
+                .values_list('id', flat=True))
+    d_th, g_th, c_th = (Movie.directors.through,
+                        Movie.genres.through,
+                        Movie.countries.through)
+    d_links, g_links, c_links = [], [], []
+    for mid in mids:
+        for did in random.sample(dir_ids, random.randint(1, 3)):
+            d_links.append(d_th(movie_id=mid, director_id=did))
+        for gid in random.sample(gen_ids, random.randint(1, 3)):
+            g_links.append(g_th(movie_id=mid, genre_id=gid))
+        for cid in random.sample(cnt_ids, random.randint(1, 2)):
+            c_links.append(c_th(movie_id=mid, country_id=cid))
+    d_th.objects.bulk_create(d_links, batch_size=1000)
+    g_th.objects.bulk_create(g_links, batch_size=1000)
+    c_th.objects.bulk_create(c_links, batch_size=1000)
+    connection.close()
+    print(f'  movies: {n}')
 
-        Movie.directors.through.objects.bulk_create([
-            Movie.directors.through(
-                movie_id=movie.id,
-                director_id=d_id
-            )
-            for movie in movies
-            for d_id in random.sample(directors, random.randint(1, 3))
-        ])
+def _ratings_chunk(users_data, movies_data, per_user):
+    objs = []
+    now_naive = datetime.now()
+    for uid, u_joined in users_data:
+        u_joined_d = timezone.localtime(u_joined).date() \
+            if timezone.is_aware(u_joined) else u_joined.date()
+        for mid, m_release in random.sample(movies_data, per_user):
+            # оценка не раньше регистрации пользователя и выхода фильма
+            start_dt = datetime.combine(max(u_joined_d, m_release), time.min) \
+                       + timedelta(seconds=1)
+            if start_dt >= now_naive:
+                continue
+            created = _aware(fake.date_time_between(
+                start_date=start_dt, end_date=now_naive))
+            objs.append(Rating(
+                movie_id=mid, user_id=uid,
+                rating_value=random.choices(range(1, 11), RATING_WEIGHTS)[0],
+                created_at=created,
+            ))
+    Rating.objects.bulk_create(objs, batch_size=400)
+    connection.close()
 
-        Movie.genres.through.objects.bulk_create([
-            Movie.genres.through(
-                movie_id=movie.id,
-                genre_id=g_id
-            )
-            for movie in movies
-            for g_id in random.sample(genres, random.randint(1, 5))
-        ])
+def gen_ratings(total=500, per_user=10, workers=10):
+    users = list(User.objects.filter(ratings__isnull=True)
+                 .values_list('id', 'date_joined'))
+    movies = list(Movie.objects.values_list('id', 'date_of_release'))
+    need = min(total // per_user, len(users))
+    users = random.sample(users, need)
+    size = max(1, len(users) // workers)
+    chunks = [users[i:i + size] for i in range(0, len(users), size)]
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        list(ex.map(lambda c: _ratings_chunk(c, movies, per_user), chunks))
+    print(f'  ratings: ~{need * per_user}')
 
-        Movie.countries.through.objects.bulk_create([
-            Movie.countries.through(
-                movie_id=movie.id,
-                country_id=c_id
-            )
-            for movie in movies
-            for c_id in random.sample(countries, random.randint(1, 5))
-        ])
-    close_old_connections()
+def _reviews_chunk(data):
+    objs = []
+    now_naive = datetime.now()
+    for rid, r_created in data:
+        # рецензия не раньше оценки
+        start_naive = _local_naive(r_created) + timedelta(seconds=1)
+        if start_naive >= now_naive:
+            continue
+        created = _aware(fake.date_time_between(
+            start_date=start_naive, end_date=now_naive))
+        objs.append(Review(
+            rating_id=rid,
+            text=fake.text(max_nb_chars=800),
+            is_spoiler=random.random() < 0.1,
+            created_at=created,
+        ))
+    Review.objects.bulk_create(objs, batch_size=400)
+    connection.close()
 
-def create_ratings():
-    users = list(
-        User.objects.values_list('pk', 'date_joined')
-    )
-    movies = list(
-        Movie.objects.values_list('pk', 'date_of_release')
-    )
-    ratings = []
-    for _ in range(1000):
-        u_id, u_date_joined = random.choice(users)
-        m_id, m_date_of_release = random.choice(movies)
+def gen_reviews(n=50, workers=10):
+    data = list(Rating.objects.filter(reviews__isnull=True)
+                .values_list('id', 'created_at'))
+    chosen = random.sample(data, min(n, len(data)))
+    size = max(1, len(chosen) // workers)
+    chunks = [chosen[i:i + size] for i in range(0, len(chosen), size)]
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        list(ex.map(_reviews_chunk, chunks))
+    print(f'  reviews: {len(chosen)}')
 
-        max_date = max(
-            u_date_joined.date(),
-            m_date_of_release
-        )
-        rating = Rating(
-            user_id=u_id,
-            movie_id=m_id,
-            rating_value=random.randint(1, 10),
-            created_at=fake.date_time_between(
-                start_date=max_date,
-                end_date='now'
-            )
-        )
-        ratings.append(rating)
-    insert_ratings(ratings)
-
-def create_reviews():
-    close_old_connections()
-    fake = Faker('ru_RU')
-    ratings = list(
-        Rating.objects.all()
-    )
-    # Получение ID рейтингов, для которых уже существуют рецензии
-    existing_rating_ids = set(
-        Review.objects.values_list('rating_id', flat=True)
-    )
-    # Выбираем рейтинги, для которых ещё нет рецензий
-    available_ratings = [
-        rating
-        for rating in ratings
-        if rating.pk not in existing_rating_ids
-    ]
-    reviews_count = int(len(available_ratings) * 0.2)
-    selected_ratings = random.sample(
-        available_ratings,
-        reviews_count
-    )
-    reviews = []
-    for rating in selected_ratings:
-        review = Review(
-            rating_id=rating.pk,
-            text=fake.paragraph(nb_sentences=random.randint(3, 8)),
-            is_spoiler=random.choice([True, False])
-        )
-
-        reviews.append(review)
-
-    Review.objects.bulk_create(
-        reviews,
-        batch_size=1000
-    )
-    close_old_connections()
-
-def insert_ratings(ratings, batch_size=300):
-    table = connection.ops.quote_name(
-        Rating._meta.db_table
-    )
-    user_col = connection.ops.quote_name(
-        Rating._meta.get_field('user').column
-    )
-    movie_col = connection.ops.quote_name(
-        Rating._meta.get_field('movie').column
-    )
-    value_col = connection.ops.quote_name(
-        Rating._meta.get_field('rating_value').column
-    )
-    date_col = connection.ops.quote_name(
-        Rating._meta.get_field('created_at').column
-    )
-    inserted = 0
-    iterator = iter(ratings)
-
-    while batch := list(islice(iterator, batch_size)):
-        unique = {}
-        for rating in batch:
-            unique[(rating.user_id, rating.movie_id)] = rating
-
-        batch = list(unique.values())
-        values = ', '.join(
-            ['(%s, %s, %s, %s)'] * len(batch)
-        )
-        sql = f"""
-            INSERT INTO {table}
-                ({user_col}, {movie_col}, {value_col}, {date_col})
-            SELECT
-                source.user_id,
-                source.movie_id,
-                source.rating_value,
-                source.created_at
-            FROM (VALUES {values})
-                AS source(user_id, movie_id, rating_value, created_at)
-            WHERE NOT EXISTS (
-                SELECT 1
-                FROM {table} AS target WITH (UPDLOCK, HOLDLOCK)
-                WHERE target.{user_col} = source.user_id
-                  AND target.{movie_col} = source.movie_id
-            );
-        """
-        params = []
-        for rating in batch:
-            params.extend([
-                rating.user_id,
-                rating.movie_id,
-                rating.rating_value,
-                rating.created_at,
-            ])
-
-        with transaction.atomic():
-            with connection.cursor() as cursor:
-                cursor.execute(sql, params)
-                inserted += cursor.rowcount
-
-    return inserted
-
-def run_task(func):
-    close_old_connections()
-
-    try:
-        print(f'Начало выполнения: {func.__name__}')
-
-        func()
-
-        print(f'Завершение выполнения: {func.__name__}')
-
-    finally:
-        close_old_connections()
-
-def generate_data():
-    max_workers = 4
-
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(run_task, create_genres),
-            executor.submit(run_task, create_countries)
-        ]
-
-        for future in futures:
-            future.result()
-
-        futures = [
-            executor.submit(run_task, create_directors),
-            executor.submit(run_task, create_users)
-        ]
-
-        for future in futures:
-            future.result()
-
-        executor.submit(run_task, create_movies).result()
-
-        executor.submit(run_task, create_ratings).result()
+def generate_all():
+    print('=== Generation started ===')
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        fs = [ex.submit(gen_directors), ex.submit(gen_genres),
+              ex.submit(gen_countries), ex.submit(gen_users)]
+        for f in fs:
+            f.result()
+    gen_movies()
+    gen_ratings()
+    gen_reviews()
+    print('=== Generation finished ===')
