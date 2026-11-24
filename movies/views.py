@@ -6,6 +6,11 @@ from django.views.decorators.csrf import csrf_exempt
 
 from movies.models import Genre, Country, Director, Movie, Rating, Review
 from django.contrib.auth.models import User
+from movies.emulator import (
+    start_emulator,
+    stop_emulator,
+    emulator_status
+)
 
 @csrf_exempt
 @require_POST
@@ -40,4 +45,33 @@ def show_counts_view(request):
     return JsonResponse({
         'status': 'success',
         'counts': counts
+    })
+
+@csrf_exempt
+@require_POST
+def start_emulator_view(request):
+    started = start_emulator()
+
+    return JsonResponse({
+        'status': 'success' if started else 'info',
+        'message': 'Эмулятор запущен' if started else 'Эмулятор уже запущен'
+    })
+
+
+@csrf_exempt
+@require_POST
+def stop_emulator_view(request):
+    stopped = stop_emulator()
+
+    return JsonResponse({
+        'status': 'success' if stopped else 'info',
+        'message': 'Эмулятор остановлен' if stopped else 'Эмулятор останавливается'
+    })
+
+
+@require_GET
+def emulator_status_view(request):
+    return JsonResponse({
+        'status': 'success',
+        'running': emulator_status()
     })

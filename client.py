@@ -84,22 +84,55 @@ def show_counts():
     except requests.exceptions.RequestException as e:
         print(f'\nОшибка при обращении к серверу: {e}')
 
+def start_emulator():
+    response = requests.post(f'{BASE_URL}/emulator/start/')
+    print(response.json()['message'])
+
+
+def stop_emulator():
+    response = requests.post(f'{BASE_URL}/emulator/stop/')
+    print(response.json()['message'])
+
+
+def show_emulator_status():
+    response = requests.get(f'{BASE_URL}/emulator/status/')
+    data = response.json()
+
+    print(
+        'Эмулятор работает'
+        if data['running']
+        else 'Эмулятор остановлен'
+    )
+
 
 def main():
     while True:
-        print('\n1 - Запустить генерацию')
-        print('2 - Показать количество по таблицам')
-        print('0 - Выход')
+        print('\n=== ГЛАВНОЕ МЕНЮ ===')
+        print('1. Генерация данных')
+        print('2. Просмотр количества записей')
+        print('3. Запустить эмулятор')
+        print('4. Остановить эмулятор')
+        print('5. Состояние эмулятора')
+        print('0. Выход')
 
-        c = input('> ').strip()
+        choice = input('Выберите действие: ')
 
-        if c == '1':
+        if choice == '1':
             generate_data()
 
-        elif c == '2':
+        elif choice == '2':
             show_counts()
 
-        elif c == '0':
+        elif choice == '3':
+            start_emulator()
+
+        elif choice == '4':
+            stop_emulator()
+
+        elif choice == '5':
+            show_emulator_status()
+
+        elif choice == '0':
             break
 
         else:
