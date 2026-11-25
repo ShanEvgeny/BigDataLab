@@ -26,15 +26,13 @@ COUNTRIES = ['США', 'Россия', 'Великобритания', 'Фран
 RATING_WEIGHTS = [1, 1, 2, 3, 5, 8, 10, 12, 10, 7]
 
 def _aware(dt):
-    """Faker отдаёт naive datetime; трактуем как локальное время."""
     return timezone.make_aware(dt) if timezone.is_naive(dt) else dt
 
 
 def _local_naive(dt):
-    """aware → naive в локальной TZ (для faker)."""
     return timezone.localtime(dt).replace(tzinfo=None) if timezone.is_aware(dt) else dt
 
-def gen_directors(n=10):
+def gen_directors(n=10_000):
     objs = [Director(
         full_name=fake.name(),
         short_biography=fake.text(max_nb_chars=400) if random.random() < 0.7 else None,
@@ -43,8 +41,6 @@ def gen_directors(n=10):
     ) for _ in range(n)]
     Director.objects.bulk_create(objs, batch_size=500)
     connection.close()
-    print(f'  directors: {n}')
-    pass
 
 def gen_genres():
     if (Genre.objects.exists()):
@@ -62,7 +58,7 @@ def gen_countries():
     )
     connection.close()
 
-def gen_users(n=100):
+def gen_users(n=100_000):
     pwd = make_password('password123')
     objs = [User(
         username=f'{fake.user_name()}_{fake.uuid4()}',
@@ -75,10 +71,8 @@ def gen_users(n=100):
     ) for _ in range(n)]
     User.objects.bulk_create(objs, batch_size=100)
     connection.close()
-    print(f'  users: {n}')
-    pass
 
-def gen_movies(n=50):
+def gen_movies(n=50_000):
     dir_ids = list(Director.objects.values_list('id', flat=True))
     gen_ids = list(Genre.objects.values_list('id', flat=True))
     cnt_ids = list(Country.objects.values_list('id', flat=True))
@@ -109,7 +103,6 @@ def gen_movies(n=50):
     g_th.objects.bulk_create(g_links, batch_size=1000)
     c_th.objects.bulk_create(c_links, batch_size=1000)
     connection.close()
-    print(f'  movies: {n}')
 
 def _ratings_chunk(users_data, movies_data, per_user):
     objs = []
@@ -118,7 +111,6 @@ def _ratings_chunk(users_data, movies_data, per_user):
         u_joined_d = timezone.localtime(u_joined).date() \
             if timezone.is_aware(u_joined) else u_joined.date()
         for mid, m_release in random.sample(movies_data, per_user):
-            # оценка не раньше регистрации пользователя и выхода фильма
             start_dt = datetime.combine(max(u_joined_d, m_release), time.min) \
                        + timedelta(seconds=1)
             if start_dt >= now_naive:
@@ -133,7 +125,7 @@ def _ratings_chunk(users_data, movies_data, per_user):
     Rating.objects.bulk_create(objs, batch_size=400)
     connection.close()
 
-def gen_ratings(total=500, per_user=10, workers=10):
+def gen_ratings(total=500_000, per_user=10, workers=10):
     users = list(User.objects.filter(ratings__isnull=True)
                  .values_list('id', 'date_joined'))
     movies = list(Movie.objects.values_list('id', 'date_of_release'))
@@ -143,13 +135,11 @@ def gen_ratings(total=500, per_user=10, workers=10):
     chunks = [users[i:i + size] for i in range(0, len(users), size)]
     with ThreadPoolExecutor(max_workers=workers) as ex:
         list(ex.map(lambda c: _ratings_chunk(c, movies, per_user), chunks))
-    print(f'  ratings: ~{need * per_user}')
 
 def _reviews_chunk(data):
     objs = []
     now_naive = datetime.now()
     for rid, r_created in data:
-        # рецензия не раньше оценки
         start_naive = _local_naive(r_created) + timedelta(seconds=1)
         if start_naive >= now_naive:
             continue
@@ -164,7 +154,7 @@ def _reviews_chunk(data):
     Review.objects.bulk_create(objs, batch_size=400)
     connection.close()
 
-def gen_reviews(n=50, workers=10):
+def gen_reviews(n=50_000, workers=10):
     data = list(Rating.objects.filter(reviews__isnull=True)
                 .values_list('id', 'created_at'))
     chosen = random.sample(data, min(n, len(data)))
@@ -172,10 +162,8 @@ def gen_reviews(n=50, workers=10):
     chunks = [chosen[i:i + size] for i in range(0, len(chosen), size)]
     with ThreadPoolExecutor(max_workers=workers) as ex:
         list(ex.map(_reviews_chunk, chunks))
-    print(f'  reviews: {len(chosen)}')
 
 def generate_all():
-    print('=== Generation started ===')
     with ThreadPoolExecutor(max_workers=4) as ex:
         fs = [ex.submit(gen_directors), ex.submit(gen_genres),
               ex.submit(gen_countries), ex.submit(gen_users)]
@@ -184,4 +172,3 @@ def generate_all():
     gen_movies()
     gen_ratings()
     gen_reviews()
-    print('=== Generation finished ===')
