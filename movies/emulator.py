@@ -25,11 +25,12 @@ stop_event = threading.Event()
 emulator_thread = None
 emulator_lock = threading.Lock()
 
-
-# -------------------- Вспомогательные функции --------------------
-
 def random_obj(model):
-    return model.objects.order_by('?').first()
+    # return model.objects.order_by('?').first()
+    min_obj = model.objects.order_by('id').first()
+    max_obj = model.objects.order_by('-id').first()
+
+    return random.choice([min_obj, max_obj])
 
 
 def execute(func):
@@ -37,7 +38,6 @@ def execute(func):
     return list(result) if hasattr(result, 'query') else result
 
 
-# -------------------- CREATE --------------------
 
 def create_rating():
     user = random_obj(User)
