@@ -4,3 +4,4 @@ local.py
 .env
 movie_db
 docker-compose.yml
+monitoring_results

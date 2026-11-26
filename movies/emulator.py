@@ -27,8 +27,8 @@ emulator_lock = threading.Lock()
 
 def random_obj(model):
     # return model.objects.order_by('?').first()
-    min_obj = model.objects.order_by('id').first()
-    max_obj = model.objects.order_by('-id').first()
+    min_obj = model.objects.earliest("id")
+    max_obj = model.objects.latest("id")
 
     return random.choice([min_obj, max_obj])
 
@@ -189,13 +189,33 @@ def get_5_new_films():
 
 
 def get_5_by_rating():
-    return list(
-        Movie.objects.annotate(
-            avg_rating=Round(
-                Avg('ratings__rating_value', output_field=FloatField()), 1
-            )
-        ).order_by('-avg_rating')[:5]
-    )
+    # return list(
+    #     Movie.objects.annotate(
+    #         avg_rating=Round(
+    #             Avg('ratings__rating_value', output_field=FloatField()), 1
+    #         )
+    #     ).order_by('-avg_rating')[:5]
+    # )
+    raw_sql = """
+        WITH TopMovies AS (
+            SELECT TOP 5
+                movie_id,
+                ROUND(AVG(CONVERT(float, rating_value)), 1) AS avg_rating
+            FROM [movies_rating]
+            GROUP BY movie_id
+            ORDER BY avg_rating DESC
+        )
+        SELECT
+            m.id,
+            m.title,
+            m.date_of_release,
+            m.brief_information,
+            tm.avg_rating
+        FROM [movies_movie] AS m
+        INNER JOIN TopMovies AS tm ON m.id = tm.movie_id
+        ORDER BY tm.avg_rating DESC
+    """
+    return list(Movie.objects.raw(raw_sql))
 
 
 def get_5_old_directors():
